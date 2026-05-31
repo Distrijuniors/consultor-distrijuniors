@@ -1,42 +1,39 @@
 exports.handler = async function(event, context) {
-    // 1. Evitar que alguien entre directamente al link desde el navegador
-    if (event.httpMethod !== "POST") {
-        return { statusCode: 405, body: "Método no permitido" };
-    }
+    if (event.httpMethod !== "POST") return { statusCode: 405, body: "Método no permitido" };
 
     try {
-        // 2. Leer qué producto pidió buscar el celular
         const body = JSON.parse(event.body);
         const textoBuscado = body.textoBuscado;
 
-        // 3. Sacar las llaves de la "caja fuerte" de Netlify
-        const ODOO_URL = process.env.ODOO_URL; // Ej: https://distrijuniors.com/jsonrpc
+        const ODOO_URL = process.env.ODOO_URL;
         const ODOO_DB = process.env.ODOO_DB;
         const ODOO_USER = process.env.ODOO_USER;
         const ODOO_KEY = process.env.ODOO_KEY;
 
-        // 4. El cadete se autentica en Odoo
+        // 1. Tocarle la puerta a Odoo (Autenticación)
         const authResponse = await fetch(ODOO_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 jsonrpc: "2.0",
                 method: "call",
-                params: {
-                    service: "common",
-                    method: "authenticate",
-                    args: [ODOO_DB, ODOO_USER, ODOO_KEY, {}]
-                }
+                params: { service: "common", method: "authenticate", args: [ODOO_DB, ODOO_USER, ODOO_KEY, {}] }
             })
         });
         const authData = await authResponse.json();
-        const uid = authData.result;
 
-        if (!uid) {
-            throw new Error("Credenciales de Odoo rechazadas.");
+        // Si Odoo rechaza el dominio
+        if (authData.error) {
+            return { statusCode: 200, body: JSON.stringify({ productos: [{ name: "URL O BASE DE DATOS INCORRECTA", list_price: 0, default_code: "¡ALTO!" }] }) };
         }
 
-        // 5. El cadete busca el producto
+        const uid = authData.result;
+        // Si Odoo rechaza la clave o el usuario
+        if (!uid) {
+            return { statusCode: 200, body: JSON.stringify({ productos: [{ name: "CLAVE O USUARIO RECHAZADOS POR ODOO", list_price: 0, default_code: "¡ALTO!" }] }) };
+        }
+
+        // 2. Buscar en el catálogo (CON EL FILTRO DE $60 ACTIVADO)
         const searchResponse = await fetch(ODOO_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -47,9 +44,7 @@ exports.handler = async function(event, context) {
                     service: "object",
                     method: "execute_kw",
                     args: [
-                        ODOO_DB,
-                        uid,
-                        ODOO_KEY,
+                        ODOO_DB, uid, ODOO_KEY,
                         "product.product",
                         "search_read",
                         [
@@ -71,17 +66,18 @@ exports.handler = async function(event, context) {
         });
         const searchData = await searchResponse.json();
 
-        // 6. El cadete devuelve SOLO la lista de productos al celular
+        // Si la búsqueda tiene un error técnico
+        if (searchData.error) {
+            let mensajeError = searchData.error.data ? searchData.error.data.message : "Error interno de Odoo";
+            return { statusCode: 200, body: JSON.stringify({ productos: [{ name: "ODOO SE QUEJA: " + mensajeError, list_price: 0, default_code: "ERROR TÉCNICO" }] }) };
+        }
+
         return {
             statusCode: 200,
             body: JSON.stringify({ productos: searchData.result || [] })
         };
 
     } catch (error) {
-        console.error("Error en servidor oculto:", error);
-        return {
-            statusCode: 500,
-            body: JSON.stringify({ error: "No se pudo conectar con el depósito." })
-        };
+        return { statusCode: 200, body: JSON.stringify({ productos: [{ name: "ERROR DEL CADETE: " + error.message, list_price: 0, default_code: "AVISO" }] }) };
     }
 }

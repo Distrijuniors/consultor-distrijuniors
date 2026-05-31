@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Consultor de Precios - Distrijuniors</title>
+    <!-- Cargamos Tailwind CSS para los estilos -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- Librería para el lector de código de barras con la cámara -->
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; }
+        /* Estilos para el lector de cámara */
+        #lector-camara { width: 100%; border-radius: 1rem; overflow: hidden; border: 2px solid #e2e8f0; }
+        #lector-camara video { border-radius: 1rem; }
+    </style>
+</head>
+<body class="flex flex-col items-center min-h-screen p-4 md:p-8">
+
+    <!-- Encabezado con el Logo/Nombre -->
+    <header class="w-full max-w-md text-center mb-8 mt-4">
+        <h1 class="text-3xl font-black text-slate-800 tracking-tight">
+            DISTRI<span class="text-blue-600">JUNIORS</span>
+        </h1>
+        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Consultor de Precios</p>
+    </header>
+
+    <!-- Caja de Búsqueda -->
+    <main class="w-full max-w-md bg-white p-6 rounded-3xl shadow-xl border border-slate-200">
+        <div class="relative mb-6 flex gap-2 md:gap-3">
+            <div class="relative flex-1">
+                <i class="fas fa-search absolute left-3 md:left-4 top-1/2 transform -translate-y-1/2 text-slate-400 text-lg md:text-xl"></i>
+                <input 
+                    type="text" 
+                    id="barra-busqueda" 
+                    oninput="buscarProducto()" 
+                    placeholder="Nombre o código..." 
+                    class="w-full pl-10 pr-10 md:pl-12 md:pr-12 py-3 md:py-4 bg-slate-50 border-2 border-slate-200 rounded-xl md:rounded-2xl outline-none focus:border-blue-500 font-bold text-slate-700 text-base md:text-lg uppercase transition-all"
+                    autocomplete="off"
+                >
+                <!-- Botón de la X para limpiar, oculto por defecto -->
+                <button id="btn-limpiar" onclick="limpiarBusqueda()" class="absolute right-3 md:right-4 top-1/2 transform -translate-y-1/2 text-slate-300 hover:text-red-500 hidden text-xl md:text-2xl transition">
+                    <i class="fas fa-times-circle"></i>
+                </button>
+            </div>
+            
+            <!-- Botón para prender la cámara (ÚNICO) -->
+            <button onclick="toggleEscaneo()" class="bg-blue-600 hover:bg-blue-700 text-white w-14 md:w-16 flex-shrink-0 flex items-center justify-center rounded-xl md:rounded-2xl shadow-md transition text-xl md:text-2xl">
+                <i class="fas fa-qrcode"></i>
+            </button>
+        </div>
+
+        <!-- Contenedor del escáner de cámara (Oculto por defecto) -->
+        <div id="lector-contenedor" class="hidden mb-6 flex flex-col items-center">
+            <p class="text-xs font-bold text-blue-500 uppercase tracking-widest mb-2"><i class="fas fa-camera mr-1"></i> Apuntá al código</p>
+            <div id="lector-camara"></div>
+            <button onclick="toggleEscaneo()" class="mt-3 bg-slate-100 text-slate-500 px-4 py-2 rounded-xl text-sm font-bold hover:bg-red-50 hover:text-red-500 transition">
+                Cancelar Escaneo
+            </button>
+        </div>
+
+        <!-- Contenedor de resultados -->
+        <div id="resultados" class="space-y-3">
+            <!-- La Bienvenida del Personaje -->
+            <div class="flex flex-col items-center justify-center py-6 text-slate-500">
+                <div class="relative mb-4">
+                    <div class="w-28 h-28 rounded-full shadow-lg border-4 border-white overflow-hidden bg-slate-100">
+                        <img src="rana.png" alt="Rana Distrijuniors" class="w-full h-full object-cover">
+                    </div>
+                    <div class="absolute -top-2 -right-4 bg-white border-2 border-slate-200 px-3 py-1 rounded-2xl text-[10px] font-black text-slate-700 shadow-sm rotate-6">
+                        ¡Hola!
+                    </div>
+                </div>
+                <h2 class="text-lg font-black text-slate-700 mb-1">¡Bienvenido a Distrijuniors!</h2>
+                <p class="text-center text-sm font-medium text-slate-400">
+                    Escribí lo que buscás acá arriba o tocá el botón del código QR para usar tu cámara.
+                </p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Nuestro Motor de Conexión a Odoo -->
+    <script>
+        let numeroDeTicket = 0; 
+        let html5QrcodeScanner = null;
+
+        // 1. LÓGICA DE LA CÁMARA
+        function toggleEscaneo() {
+            const contenedor = document.getElementById('lector-contenedor');
+            const resultados = document.getElementById('resultados');
+            
+            if (contenedor.classList.contains('hidden')) {
+                contenedor.classList.remove('hidden');
+                resultados.classList.add('hidden'); 
+                
+                html5QrcodeScanner = new Html5QrcodeScanner(
+                    "lector-camara", 
+                    { fps: 10, qrbox: {width: 250, height: 250} }, 
+                    false
+                );
+                html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+            } else {
+                if (html5QrcodeScanner) {
+                    html5QrcodeScanner.clear();
+                }
+                contenedor.classList.add('hidden');
+                resultados.classList.remove('hidden');
+            }
+        }
+
+        function onScanSuccess(decodedText, decodedResult) {
+            document.getElementById('barra-busqueda').value = decodedText;
+            toggleEscaneo(); 
+            buscarProducto(); 
+        }
+
+        function onScanFailure(error) {
+            // Ignorado mientras busca
+        }
+
+        // 2. FUNCIÓN DE LA X
+        function limpiarBusqueda() {
+            document.getElementById('barra-busqueda').value = '';
+            document.getElementById('btn-limpiar').classList.add('hidden');
+            document.getElementById('barra-busqueda').focus(); 
+            
+            document.getElementById('resultados').innerHTML = `
+            <div class="flex flex-col items-center justify-center py-6 text-slate-500">
+                <div class="relative mb-4">
+                    <div class="w-28 h-28 rounded-full shadow-lg border-4 border-white overflow-hidden bg-slate-100">
+                        <img src="rana.png" alt="Rana Distrijuniors" class="w-full h-full object-cover">
+                    </div>
+                    <div class="absolute -top-2 -right-4 bg-white border-2 border-slate-200 px-3 py-1 rounded-2xl text-[10px] font-black text-slate-700 shadow-sm rotate-6">
+                        ¡Hola!
+                    </div>
+                </div>
+                <h2 class="text-lg font-black text-slate-700 mb-1">¡Bienvenido a Distrijuniors!</h2>
+                <p class="text-center text-sm font-medium text-slate-400">
+                    Escribí lo que buscás acá arriba o tocá el botón del código QR para usar tu cámara.
+                </p>
+            </div>`;
+        }
+
+        // 3. LA BÚSQUEDA SEGURA (Llama al cadete en Netlify Functions)
+        async function buscarProducto() {
+            const textoBuscado = document.getElementById('barra-busqueda').value.trim();
+            const contenedorResultados = document.getElementById('resultados');
+            const btnLimpiar = document.getElementById('btn-limpiar');
+
+            numeroDeTicket++;
+            const miTicket = numeroDeTicket;
+
+            if (textoBuscado === "") {
+                limpiarBusqueda();
+                return;
+            } else {
+                btnLimpiar.classList.remove('hidden');
+            }
+
+            contenedorResultados.innerHTML = '<p class="text-center text-blue-500 font-bold text-sm py-8"><i class="fas fa-spinner fa-spin mr-2"></i>Buscando en depósito...</p>';
+
+            try {
+                // Acá ya no conectamos a Odoo, le mandamos la orden al archivo buscar.js
+                const respuesta = await fetch('/.netlify/functions/buscar', {
+                    method: 'POST',
+                    body: JSON.stringify({ textoBuscado: textoBuscado })
+                });
+                
+                const datos = await respuesta.json();
+
+                if (miTicket !== numeroDeTicket) return;
+
+                const productosEncontrados = datos.productos || [];
+
+                if (productosEncontrados.length === 0) {
+                    contenedorResultados.innerHTML = '<p class="text-center text-red-400 font-bold text-sm py-8"><i class="fas fa-times-circle mr-2"></i>No se encontró el producto.</p>';
+                } else {
+                    let html = '';
+                    productosEncontrados.forEach(prod => {
+                        const codigoMostrado = prod.default_code || prod.barcode || "SIN CÓDIGO";
+                        const precioFormateado = prod.list_price.toLocaleString('es-AR', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+                        
+                        const fotoHtml = prod.image_512 
+                            ? `<img src="data:image/jpeg;base64,${prod.image_512}" class="w-full h-48 object-contain rounded-xl mb-4 bg-white p-2 border border-slate-200 shadow-sm mx-auto">` 
+                            : ``;
+
+                        html += `
+                        <div class="p-4 border-2 border-blue-100 bg-blue-50 rounded-2xl flex flex-col items-center text-center">
+                            ${fotoHtml}
+                            <span class="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-1">${codigoMostrado}</span>
+                            <h2 class="text-lg font-black text-slate-800 leading-tight mb-2">${prod.name}</h2>
+                            <div class="bg-blue-600 text-white w-full py-3 rounded-xl shadow-md mt-2">
+                                <span class="text-3xl font-black">$${precioFormateado}</span>
+                            </div>
+                        </div>`;
+                    });
+                    contenedorResultados.innerHTML = html;
+                }
+            } catch (error) {
+                if (miTicket === numeroDeTicket) {
+                    contenedorResultados.innerHTML = '<p class="text-center text-red-500 font-bold text-sm py-8">Error de comunicación. Intentá de nuevo.</p>';
+                }
+            }
+        }
+    </script>
+</body>
+</html>

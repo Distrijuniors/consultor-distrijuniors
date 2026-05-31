@@ -1,0 +1,87 @@
+exports.handler = async function(event, context) {
+    // 1. Evitar que alguien entre directamente al link desde el navegador
+    if (event.httpMethod !== "POST") {
+        return { statusCode: 405, body: "Método no permitido" };
+    }
+
+    try {
+        // 2. Leer qué producto pidió buscar el celular
+        const body = JSON.parse(event.body);
+        const textoBuscado = body.textoBuscado;
+
+        // 3. Sacar las llaves de la "caja fuerte" de Netlify
+        const ODOO_URL = process.env.ODOO_URL; // Ej: https://distrijuniors.com/jsonrpc
+        const ODOO_DB = process.env.ODOO_DB;
+        const ODOO_USER = process.env.ODOO_USER;
+        const ODOO_KEY = process.env.ODOO_KEY;
+
+        // 4. El cadete se autentica en Odoo
+        const authResponse = await fetch(ODOO_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                jsonrpc: "2.0",
+                method: "call",
+                params: {
+                    service: "common",
+                    method: "authenticate",
+                    args: [ODOO_DB, ODOO_USER, ODOO_KEY, {}]
+                }
+            })
+        });
+        const authData = await authResponse.json();
+        const uid = authData.result;
+
+        if (!uid) {
+            throw new Error("Credenciales de Odoo rechazadas.");
+        }
+
+        // 5. El cadete busca el producto
+        const searchResponse = await fetch(ODOO_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                jsonrpc: "2.0",
+                method: "call",
+                params: {
+                    service: "object",
+                    method: "execute_kw",
+                    args: [
+                        ODOO_DB,
+                        uid,
+                        ODOO_KEY,
+                        "product.product",
+                        "search_read",
+                        [
+                            [
+                                ['list_price', '>=', 60],
+                                '|', '|',
+                                ['name', 'ilike', textoBuscado],
+                                ['default_code', 'ilike', textoBuscado],
+                                ['barcode', '=', textoBuscado]
+                            ]
+                        ],
+                        {
+                            "fields": ["name", "default_code", "barcode", "list_price", "image_512"],
+                            "limit": 10
+                        }
+                    ]
+                }
+            })
+        });
+        const searchData = await searchResponse.json();
+
+        // 6. El cadete devuelve SOLO la lista de productos al celular
+        return {
+            statusCode: 200,
+            body: JSON.stringify({ productos: searchData.result || [] })
+        };
+
+    } catch (error) {
+        console.error("Error en servidor oculto:", error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: "No se pudo conectar con el depósito." })
+        };
+    }
+}

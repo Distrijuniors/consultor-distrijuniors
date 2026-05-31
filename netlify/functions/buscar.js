@@ -3,14 +3,15 @@ exports.handler = async function(event, context) {
 
     try {
         const body = JSON.parse(event.body);
-        const textoBuscado = body.textoBuscado;
+        // Recibimos el texto y le sacamos espacios extra de los costados
+        const textoBuscado = body.textoBuscado.trim();
 
         const ODOO_URL = process.env.ODOO_URL;
         const ODOO_DB = process.env.ODOO_DB;
         const ODOO_USER = process.env.ODOO_USER;
         const ODOO_KEY = process.env.ODOO_KEY;
 
-        // 1. Tocarle la puerta a Odoo (Autenticación)
+        // 1. Autenticación en Odoo
         const authResponse = await fetch(ODOO_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -22,18 +23,38 @@ exports.handler = async function(event, context) {
         });
         const authData = await authResponse.json();
 
-        // Si Odoo rechaza el dominio
-        if (authData.error) {
-            return { statusCode: 200, body: JSON.stringify({ productos: [{ name: "URL O BASE DE DATOS INCORRECTA", list_price: 0, default_code: "¡ALTO!" }] }) };
-        }
-
+        if (authData.error) return { statusCode: 200, body: JSON.stringify({ productos: [{ name: "URL O BASE DE DATOS INCORRECTA", list_price: 0, default_code: "¡ALTO!" }] }) };
+        
         const uid = authData.result;
-        // Si Odoo rechaza la clave o el usuario
-        if (!uid) {
-            return { statusCode: 200, body: JSON.stringify({ productos: [{ name: "CLAVE O USUARIO RECHAZADOS POR ODOO", list_price: 0, default_code: "¡ALTO!" }] }) };
-        }
+        if (!uid) return { statusCode: 200, body: JSON.stringify({ productos: [{ name: "CLAVE O USUARIO RECHAZADOS POR ODOO", list_price: 0, default_code: "¡ALTO!" }] }) };
 
-        // 2. Buscar en el catálogo (CON EL FILTRO DE $60 ACTIVADO)
+
+        // --- 2. LÓGICA DE BÚSQUEDA INTELIGENTE (MÚLTIPLES PALABRAS) ---
+        // Cortamos la frase en palabras sueltas usando los espacios
+        const palabras = textoBuscado.split(/\s+/); 
+        const nameConditions = [];
+        
+        // Odoo necesita un conector '&' (Y) por cada palabra extra que agreguemos
+        for (let i = 0; i < palabras.length - 1; i++) {
+            nameConditions.push('&');
+        }
+        
+        // Le decimos que busque CADA palabra individualmente adentro del nombre
+        palabras.forEach(palabra => {
+            nameConditions.push(['name', 'ilike', palabra]);
+        });
+
+        // Armamos el filtro final mezclando el precio, el código y las palabras sueltas
+        const dominioOdoo = [
+            ['list_price', '>=', 60],
+            '|', '|',
+            ['barcode', '=', textoBuscado],
+            ['default_code', 'ilike', textoBuscado],
+            ...nameConditions
+        ];
+        // ----------------------------------------------------------------
+
+        // 3. Ejecutar la búsqueda con el nuevo motor
         const searchResponse = await fetch(ODOO_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -47,15 +68,7 @@ exports.handler = async function(event, context) {
                         ODOO_DB, uid, ODOO_KEY,
                         "product.product",
                         "search_read",
-                        [
-                            [
-                                ['list_price', '>=', 60],
-                                '|', '|',
-                                ['name', 'ilike', textoBuscado],
-                                ['default_code', 'ilike', textoBuscado],
-                                ['barcode', '=', textoBuscado]
-                            ]
-                        ],
+                        [dominioOdoo],
                         {
                             "fields": ["name", "default_code", "barcode", "list_price", "image_512"],
                             "limit": 10
@@ -66,7 +79,6 @@ exports.handler = async function(event, context) {
         });
         const searchData = await searchResponse.json();
 
-        // Si la búsqueda tiene un error técnico
         if (searchData.error) {
             let mensajeError = searchData.error.data ? searchData.error.data.message : "Error interno de Odoo";
             return { statusCode: 200, body: JSON.stringify({ productos: [{ name: "ODOO SE QUEJA: " + mensajeError, list_price: 0, default_code: "ERROR TÉCNICO" }] }) };
